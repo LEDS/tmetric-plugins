@@ -45,11 +45,18 @@
             
             var projectName = $$.try('h1 > span.project-name').textContent;
 
-            var serviceType = 'xDevel.taiga';
+            var serviceType = 'GitHub';
 
             var serviceUrl = source.protocol + source.host;
 
             var issueUrl = source.path;
+
+            console.log(issueId );
+            console.log(issueName );
+            console.log(projectName );
+            console.log(serviceType );
+            console.log(serviceUrl );
+            console.log(issueUrl );
 
             return { issueId, issueName, projectName, serviceType, serviceUrl, issueUrl };
         }

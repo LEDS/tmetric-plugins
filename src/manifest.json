@@ -5,7 +5,7 @@
     "short_name": "TMetric",
     "description": "Integrates TMetric with xDevel management tools",
     "author": "Devart - feat xDevel Team",
-    "version": "1.0.5",
+    "version": "1.0.9",
 
     "icons": {
         "16": "images/chrome/icon16.png",
