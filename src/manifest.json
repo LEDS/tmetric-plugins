@@ -1,11 +1,11 @@
 {
     "manifest_version": 2,
 
-    "name": "TMetric - Time Tracker Extension",
+    "name": "xDevel - TMetric extension",
     "short_name": "TMetric",
-    "description": "Integrates TMetric with popular task and project management tools.",
-    "author": "Devart",
-    "version": "1.3.3",
+    "description": "Integrates TMetric with xDevel management tools",
+    "author": "Devart - feat xDevel Team",
+    "version": "1.0.5",
 
     "icons": {
         "16": "images/chrome/icon16.png",
@@ -71,6 +71,7 @@
                 "in-page-scripts/integrations/wrike.js",
                 "in-page-scripts/integrations/youTrack.js",
                 "in-page-scripts/integrations/zendesk.js",
+                "in-page-scripts/integrations/taiga.js",
                 "in-page-scripts/page.js"
             ],
             "css": [

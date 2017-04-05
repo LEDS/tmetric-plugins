@@ -11,7 +11,6 @@
             var convertPatternToRegExp = (matchPattern: string) => new RegExp(matchPattern
                 .replace(/[\-\/\\\^\$\+\?\.\(\)\|\[\]\{\}]/g, '\\$&')
                 .replace(/\*/g, '.*'));
-
             integrations.forEach(integration => {
 
                 this._allIntegrations.push(integration);
