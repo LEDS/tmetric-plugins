@@ -35,6 +35,7 @@
     private _timeFormat: string;
     private _projects: Models.Project[];
     private _tags: Models.Tag[];
+    private _constants: Models.Constants;
 
     callBackground(message: IPopupRequest): Promise<IPopupResponse> { return; };
 
@@ -46,6 +47,7 @@
             this._timeFormat = data.timeFormat;
             this._projects = data.projects;
             this._tags = data.tags;
+            this._constants = data.constants;
         } else {
             this.close();
         }
@@ -114,6 +116,20 @@
         viewing: 'viewing'
     };
 
+    private iconIssueIdDomains = {
+        'asana.com': true,
+        'basecamp.com': true,
+        'producteev.com': true,
+        'teamweek.com': true,
+        'todoist.com': true,
+        'userecho.com': true,
+        'uservoice.com': true,
+        'wrike.com': true,
+        'wunderlist.com': true
+    };
+
+    private domainRegExp = /([^\.\/]+\.[^\.\/]+)\//;
+
     switchState(name: string) {
         $('content').attr('class', name);
         if (name == this._states.creating) {
@@ -122,37 +138,45 @@
     }
 
     fillFixForm(timer: Models.Timer) {
-        if (timer && timer.workTask) {
-            $(this._forms.fix + ' .description').text(this.toDescription(timer.workTask.description));
+        if (timer && timer.details) {
+            $(this._forms.fix + ' .description').text(this.toDescription(timer.details.description));
             $(this._forms.fix + ' .startTime').text(this.toLongRunningDurationString(timer.startTime));
         }
     }
 
     fillViewForm(timer: Models.Timer) {
-        if (timer && timer.workTask) {
 
-            $(this._forms.view + ' .time').text(this.toDurationString(timer.startTime));
+        let details = timer && timer.details;
+        if (!details) {
+            return
+        }
 
-            var url = this.getTaskUrl(timer.workTask);
-            if (url && timer.workTask.externalIssueId) {
-                $(this._forms.view + ' .task .id .link').attr('href', url).text(timer.workTask.externalIssueId);
-            } else {
-                $(this._forms.view + ' .task .id').hide();
+        $(this._forms.view + ' .time').text(this.toDurationString(timer.startTime));
+
+        var url = this.getTaskUrl(timer.details);
+        if (url && details.projectTask && details.projectTask.externalIssueId) {
+            let issueIdText = details.projectTask.externalIssueId;
+            let domainMatch = this.domainRegExp.exec(url);
+            if (domainMatch && this.iconIssueIdDomains[domainMatch[1]]) {
+                issueIdText = '\u29C9'; // "Two joined squares" symbol
             }
+            $(this._forms.view + ' .task .id .link').attr('href', url).text(issueIdText);
+        } else {
+            $(this._forms.view + ' .task .id').hide();
+        }
 
-            $(this._forms.view + ' .task .name').text(this.toDescription(timer.workTask.description));
+        $(this._forms.view + ' .task .name').text(this.toDescription(details.description));
 
-            if (timer.workTask.projectId) {
-                $(this._forms.view + ' .project .name').text(this.toProjectName(timer.workTask.projectId)).show();
-            } else {
-                $(this._forms.view + ' .project').hide();
-            }
+        if (details.projectId) {
+            $(this._forms.view + ' .project .name').text(this.toProjectName(details.projectId)).show();
+        } else {
+            $(this._forms.view + ' .project').hide();
+        }
 
-            if (timer.tagsIdentifiers && timer.tagsIdentifiers.length) {
-                $(this._forms.view + ' .tags .items').text(this.makeTimerTagsText(timer.tagsIdentifiers)).show();
-            } else {
-                $(this._forms.view + ' .tags').hide();
-            }
+        if (timer.tagsIdentifiers && timer.tagsIdentifiers.length) {
+            $(this._forms.view + ' .tags .items').text(this.makeTimerTagsText(timer.tagsIdentifiers)).show();
+        } else {
+            $(this._forms.view + ' .tags').hide();
         }
     }
 
@@ -167,17 +191,20 @@
     }
 
     fillTaskTimer(selector: string, timer: Models.Timer) {
-        timer.workTask = timer.workTask || <Models.WorkTask>{};
-        timer.workTask.description = $(selector + ' .task .input').val();
-        timer.workTask.projectId = parseInt(this.getSelectValue(selector + ' .project .input')) || null;
+        timer.details = timer.details || <Models.TimeEntryDetail>{};
+        timer.details.description = $(selector + ' .task .input').val();
+        timer.details.projectId = parseInt(this.getSelectValue(selector + ' .project .input')) || null;
         timer.tagsIdentifiers = (this.getSelectValue(selector + ' .tags .input') || []).map(tag => parseInt(tag));
-        var project = this.getProject(timer.workTask.projectId);
+        var project = this.getProject(timer.details.projectId);
         timer.isBillable = project ? project.isBillable : false;
     }
 
-    getTaskUrl(task: Models.WorkTask) {
-        return (task.integrationUrl && task.relativeIssueUrl) ?
-            task.integrationUrl.replace(/\/*$/, '') + '/' + task.relativeIssueUrl.replace(/^\/*/, '') : '';
+    getTaskUrl(details: Models.TimeEntryDetail) {
+        let task = details && details.projectTask;
+        if (task && task.integrationUrl && task.relativeIssueUrl) {
+            return task.integrationUrl + task.relativeIssueUrl;
+        }
+        return '';
     }
 
     private _weekdaysShort = 'Sun_Mon_Tue_Wed_Thu_Fri_Sat'.split('_');
@@ -210,7 +237,7 @@
     isLongRunning(startTime: string) {
 
         var HOUR = 1000 * 60 * 60;
-        var LONG_RUNNING_DURATION = 10 * HOUR;
+        var LONG_RUNNING_DURATION = this._constants.maxTimerHours * HOUR;
 
         var duration = this.getDuration(startTime);
 
@@ -372,7 +399,7 @@
     }
 
     private onTaskLinkClick() {
-        var url = this.getTaskUrl(this._activeTimer.workTask);
+        var url = this.getTaskUrl(this._activeTimer.details);
         if (url) {
             this.openPageAction(url);
             this.close();

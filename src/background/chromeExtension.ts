@@ -18,7 +18,10 @@ class ChromeExtension extends ExtensionBase {
         var runAt = contentScripts.run_at;
         chrome.tabs.query({}, tabs =>
             tabs.forEach(tab => {
-                if (tab.url.indexOf('http') == 0) {
+                if (tab.url.indexOf('http') == 0
+                    && tab.url.indexOf('https://chrome.google.com/webstore/') != 0 // https://github.com/GoogleChrome/lighthouse/issues/1023
+                    && tab.url.indexOf('https://addons.opera.com/') != 0
+                ) {
                     jsFiles.forEach(file => chrome.tabs.executeScript(tab.id, { file, runAt }));
                     cssFiles.forEach(file => chrome.tabs.insertCSS(tab.id, { file }));
                 }
@@ -58,7 +61,7 @@ class ChromeExtension extends ExtensionBase {
 
         chrome.runtime.onMessageExternal.addListener((request: any, sender: any, sendResponse: Function) => {
             if (request.message == "version") {
-                sendResponse({ version: "1.3.3" });
+                sendResponse({ version: "2.0.0" });
             }
         });
 

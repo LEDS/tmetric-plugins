@@ -4,6 +4,13 @@ class ExtensionBase {
 
     showLoginDialog() { }
 
+    getDefaultConstants() {
+        let constants: Models.Constants = {
+            maxTimerHours: 12
+        };
+        return constants;
+    }
+
     getDefaultLoginPosition() {
         return {
             width: 420,
@@ -37,6 +44,8 @@ class ExtensionBase {
 
     protected extraHours: number;
 
+    private _constants: Models.Constants;
+
     private _actionOnConnect: () => void;
 
     private _timer: Models.Timer;
@@ -49,15 +58,17 @@ class ExtensionBase {
 
     private _tags: Models.Tag[];
 
-    private currentApiVersion = 1.0;
-
     private defaultApplicationUrl = 'https://app.tmetric.com/';
 
     constructor(public port: Firefox.Port) {
+
+        this._constants = this.getDefaultConstants();
+
         this.serviceUrl = this.getTestValue('tmetric.url') || this.defaultApplicationUrl;
         if (this.serviceUrl[this.serviceUrl.length - 1] != '/') {
             this.serviceUrl += '/';
         }
+
         this.extraHours = this.getTestValue('tmetric.extraHours');
         if (this.extraHours) {
             this.extraHours = parseFloat(<any>this.extraHours);
@@ -113,13 +124,16 @@ class ExtensionBase {
         });
 
         this.init(this.serviceUrl).then(() => {
-            if (this.serviceUrl != this.defaultApplicationUrl) {
-                this.getVersion().then(version => {
-                    if (this.currentApiVersion > version) {
-                        this.showNotification("You are connected to the outdated TMetric server. Extension may not function correctly. Please contact your system administrator.");
-                    }
-                });
-            }
+            this.getVersion().then(version => {
+                if (version < 1.0 && this.serviceUrl != this.defaultApplicationUrl) {
+                    this.showNotification("You are connected to the outdated TMetric server. Extension may not function correctly. Please contact your system administrator.");
+                }
+
+                if (version < 2) {
+                    this._constants.maxTimerHours = 10;
+                    this.updateState();
+                }
+            });
         });
 
         this.listenPopupAction<void, IPopupInitData>('initialize', this.initializePopupAction);
@@ -139,6 +153,10 @@ class ExtensionBase {
 
         switch (message.action) {
 
+            case 'getConstants':
+                this.sendToTabs({ action: 'setConstants', data: this._constants }, tabId);
+                break;
+
             case 'getTimer':
                 this.sendToTabs({ action: 'setTimer', data: this._timer }, tabId);
                 break;
@@ -152,8 +170,9 @@ class ExtensionBase {
 
                     // show extra time on link for test purposes
                     if (this.extraHours && this._timer && this._timer.isStarted) {
-                        let activeTask = this._timer.workTask;
-                        if (activeTask) {
+                        let activeDetails = this._timer.details;
+                        if (activeDetails && activeDetails.projectTask) {
+                            let activeTask = activeDetails.projectTask;
                             for (let i = 0; i < durations.length; i++) {
                                 let duration = durations[i];
                                 if (duration.issueUrl == activeTask.relativeIssueUrl && duration.serviceUrl == activeTask.integrationUrl) {
@@ -275,7 +294,7 @@ class ExtensionBase {
         var text = 'Not Connected';
         if (this._timer) {
             if (this._timer.isStarted) {
-                if (this.getDuration(this._timer) > 10 * 60 * 60000) {
+                if (this.getDuration(this._timer) > this._constants.maxTimerHours * 60 * 60000) {
                     state = ButtonState.fixtimer;
                     text = 'Started (Need User Action)\n'
                         + 'It looks like you forgot to stop the timer';
@@ -283,7 +302,7 @@ class ExtensionBase {
                 else {
                     state = ButtonState.stop;
                     text = 'Started\n'
-                        + (this._timer.workTask.description || '(No task description)');
+                        + (this._timer.details.description || '(No task description)');
                 }
             }
             else {
@@ -334,7 +353,7 @@ class ExtensionBase {
 
             var promise = this.setAccountToPost(status.accountId);
 
-            if (!timer.serviceUrl != !status.integrationName ||
+            if (!timer.serviceUrl != !status.integrationType ||
                 !timer.projectName != !status.projectStatus) {
 
                 // Integration or project does not exist
@@ -538,7 +557,7 @@ class ExtensionBase {
     // popup actions
 
     private getPopupData(): Promise<IPopupInitData> {
-        return new Promise((resolve, reject) => {
+        return new Promise<IPopupInitData>((resolve, reject) => {
             this.getActiveTabTitle().then((title) => {
                 resolve({
                     title: title,
@@ -547,7 +566,8 @@ class ExtensionBase {
                     projects: this._projects
                         .filter(project => project.projectStatus == Models.ProjectStatus.Open)
                         .sort((a, b) => a.projectName.localeCompare(b.projectName, [], { sensitivity: 'base' })),
-                    tags: this._tags
+                    tags: this._tags,
+                    constants: this._constants
                 });
             });
         });

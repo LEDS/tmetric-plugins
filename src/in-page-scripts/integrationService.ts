@@ -24,6 +24,10 @@
             });
         }
 
+        static setConstants(constants: Models.Constants) {
+            this._constants = constants;
+        }
+
         static setTimer(timer: Models.Timer) {
             this._timer = timer;
         }
@@ -80,18 +84,18 @@
                         issue.serviceType = this.trimText(issue.serviceType, Models.Limits.maxIntegrationType);
                         issue.projectName = this.trimText(issue.projectName, Models.Limits.maxProjectName);
 
-                        // take issueId and issueUrl from started timer if workTask description matches issue name
+                        // take issueId and issueUrl from started timer if description matches issue name
                         if (!issue.issueUrl
                             && this._timer
                             && this._timer.isStarted) {
 
-                            let workTask = this._timer.workTask;
-                            if (workTask
-                                && workTask.relativeIssueUrl
-                                && workTask.description == issue.issueName) {
+                            let projectTask = this._timer.details && this._timer.details.projectTask;
+                            if (projectTask
+                                && projectTask.relativeIssueUrl
+                                && projectTask.description == issue.issueName) {
 
-                                issue.issueUrl = workTask.relativeIssueUrl;
-                                issue.issueId = workTask.externalIssueId;
+                                issue.issueUrl = projectTask.relativeIssueUrl;
+                                issue.issueId = projectTask.externalIssueId;
                             }
                         }
 
@@ -148,7 +152,8 @@
 
         private static trimText(text: string, maxLength: number) {
             if (text) {
-                text = text.trim();
+                // Remove zero-width spaces and trim
+                text = text.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
                 if (text.length > maxLength) {
                     text = text.substring(0, maxLength - 2) + '..';
                 }
@@ -206,12 +211,12 @@
             }
 
             var duration = issueDuration && issueDuration.duration || 0;
-            if (isNewIssueStarted && newIssue.issueId) {
+            if (isNewIssueStarted && newIssue.issueUrl) {
 
                 // Show zero duration if client clock is late (TMET-947)
                 let timerDuration = Math.max(0, Date.now() - Date.parse(this._timer.startTime));
 
-                if (timerDuration <= 10 * HOUR) { // add current timer duration if timer is not long running
+                if (timerDuration <= this._constants.maxTimerHours * HOUR) { // add current timer duration if timer is not long running
                     duration += timerDuration;
                 }
             }
@@ -235,7 +240,7 @@
             newLink.appendChild(spanWithIcon);
             var span = document.createElement('span');
             span.textContent = newIssueTimer.isStarted ? 'Start timer' : 'Stop timer';
-            if (duration) {
+            if (newIssue.issueUrl && (duration || !newIssueTimer.isStarted)) {
                 span.textContent += ' (' + this.durationToString(duration) + ')';
             }
             newLink.appendChild(span);
@@ -274,6 +279,8 @@
         private static _allIntegrations = <WebToolIntegration[]>[];
 
         private static _possibleIntegrations: WebToolIntegration[];
+
+        private static _constants: Models.Constants;
 
         private static _timer: Models.Timer;
 
@@ -326,23 +333,28 @@
             }
         }
 
-        private static isIssueStarted(issue: WebToolIssue): boolean {
+        private static isIssueStarted(issue: WebToolIssue) {
+
             var timer = this._timer;
-            if (!timer) {
+            if (!timer || !timer.isStarted || !timer.details) {
                 return false;
             }
 
-            var task = timer.workTask;
-            if (!task && !timer.isStarted) {
-                return false;
-            }
+            let startedIssue: WebToolIssue;
 
-            var startedIssue = <WebToolIssue>{
-                issueId: task.externalIssueId,
-                issueName: task.description,
-                issueUrl: task.relativeIssueUrl,
-                serviceUrl: task.integrationUrl
-            };
+            let task = timer.details.projectTask;
+            if (task) {
+                startedIssue = {
+                    issueId: task.externalIssueId,
+                    issueName: task.description,
+                    issueUrl: task.relativeIssueUrl,
+                    serviceUrl: task.integrationUrl
+                };
+            } else {
+                startedIssue = {
+                    issueName: timer.details.description
+                }
+            }
 
             return this.isSameIssue(startedIssue, issue);
         }

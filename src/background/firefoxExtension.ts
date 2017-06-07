@@ -41,9 +41,15 @@ class FirefoxExtension extends ExtensionBase {
                 ],
             }).port);
 
-        pageMod.PageMod({
+        // Add message listeners to service pages
+        let defaultDomain = 'tmetric.com';
+        let messageListenerPatterns = ['*.' + defaultDomain];
+        if (this.serviceUrl.indexOf(defaultDomain) < 0) {
             // https://developer.mozilla.org/en-US/Add-ons/SDK/Low-Level_APIs/util_match-pattern
-            include: ["*.alm-build", "*.localhost", "*.app.tmetric.com"],
+            messageListenerPatterns.push(this.serviceUrl + '*');
+        }
+        pageMod.PageMod({
+            include: messageListenerPatterns,
             contentScriptWhen: "start",
             attachTo: ["existing", "top"],
             contentScriptFile: "./in-page-scripts/firefoxMessageListener.js"
@@ -91,6 +97,7 @@ class FirefoxExtension extends ExtensionBase {
             './in-page-scripts/integrations/axosoft.js',
             './in-page-scripts/integrations/basecamp.js',
             './in-page-scripts/integrations/bitbucket.js',
+            "./in-page-scripts/integrations/freshdesk.js",
             './in-page-scripts/integrations/bugzilla.js',
             './in-page-scripts/integrations/gitHub.js',
             './in-page-scripts/integrations/gitLab.js',
@@ -106,9 +113,11 @@ class FirefoxExtension extends ExtensionBase {
             './in-page-scripts/integrations/todoist.js',
             './in-page-scripts/integrations/trac.js',
             './in-page-scripts/integrations/trello.js',
+            './in-page-scripts/integrations/userecho.js',
             './in-page-scripts/integrations/uservoice.js',
             './in-page-scripts/integrations/waffle.js',
             './in-page-scripts/integrations/wrike.js',
+            './in-page-scripts/integrations/wunderlist.js',
             './in-page-scripts/integrations/youTrack.js',
             './in-page-scripts/integrations/zendesk.js',
             './in-page-scripts/page.js'

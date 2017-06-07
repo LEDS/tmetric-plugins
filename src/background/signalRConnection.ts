@@ -24,6 +24,8 @@
 
     disconnecting = false;
 
+    serverApiVersion: number;
+
     constructor() {
         this.listenPortAction<string>('init', this.init);
         this.listenPortAction<void>('disconnect', this.disconnect);
@@ -198,27 +200,34 @@
 
         console.log('connect');
         return new Promise<Models.UserProfile>((callback, reject) => {
+
             if (this.hubConnected) {
                 console.log('connect: hubConnected');
                 callback(this.userProfile);
                 return;
             }
 
-            this.getProfile().then((profile) => {
-                Promise.all<any>([this.getProjects(), this.getTags()]).then(([projects, tags]) => {
-                    this.hub.start().then(() => {
-                        //this.hub['disconnectTimeout'] = 1000; // for dev
-                        this.hubConnected = true;
-                        this.setRetryPending(false);
-                        this.hubProxy.invoke('register', profile.userProfileId)
-                            .then(() => callback(profile))
-                            .fail(reject);
-                    }).fail(reject);
-                }).catch(reject);
-            }).catch(e => {
-                console.log('connect: getProfile failed');
-                reject(e);
-            });
+            Promise.all([this.getVersion(), this.getProfile()])
+                .then(([version, profile]) => {
+                    Promise.all([this.getProjects(), this.getTags()])
+                        .then(() => {
+                            this.hub.start()
+                                .then(() => {
+                                    //this.hub['disconnectTimeout'] = 1000; // for dev
+                                    this.hubConnected = true;
+                                    this.setRetryPending(false);
+                                    this.hubProxy.invoke('register', profile.userProfileId)
+                                        .then(() => callback(profile))
+                                        .fail(reject);
+                                })
+                                .fail(reject);
+                        })
+                        .catch(reject);
+                })
+                .catch(e => {
+                    console.log('connect: getProfile failed');
+                    reject(e);
+                });
         });
     }
 
@@ -242,10 +251,27 @@
 
     putTimer(timer: Models.Timer) {
         return this.connect().then(profile => {
-            var accountId = this.accountToPost || profile.activeAccountId;
+
+            let accountId = this.accountToPost || profile.activeAccountId;
             this.expectedTimerUpdate = true;
 
-            var promise = this.put('api/timer/' + accountId, timer)
+            // Legacy API
+            if (this.serverApiVersion < 2 && timer.details) {
+                let projectTask = timer.details.projectTask;
+                let workTask = <Models.WorkTaskLegacy>{
+                    description: timer.details.description,
+                    projectId: timer.details.projectId
+                };
+                if (projectTask) {
+                    workTask.externalIssueId = projectTask.externalIssueId;
+                    workTask.integrationId = projectTask.integrationId;
+                    workTask.relativeIssueUrl = projectTask.relativeIssueUrl;
+                }
+                timer.workTask = workTask;
+            }
+
+            let promise = this
+                .put(this.getTimerUrl(accountId), timer)
                 .then(() => this.checkProfileChange());
 
             promise.catch(() => {
@@ -265,7 +291,7 @@
         return this.connect().then(profile => {
             let accountId = this.accountToPost || profile.activeAccountId;
             this.expectedTimerUpdate = true;
-            var promise = this.post('api/timer/external/' + accountId, timer).then(() => {
+            var promise = this.post(this.getExternalTimerUrl(accountId), timer).then(() => {
                 this.checkProfileChange();
             });
             promise.catch(() => {
@@ -278,13 +304,13 @@
     getIntegration(identifier: Models.IntegratedProjectIdentifier) {
         return this.checkProfile().then(profile =>
             this.get<Models.IntegratedProjectStatus>(
-                'api/account/' + profile.activeAccountId + '/integrations/project?' + $.param(identifier, true)));
+                this.getIntegrationProjectUrl(profile.activeAccountId) + '?' + $.param(identifier, true)));
     }
 
     postIntegration(identifier: Models.IntegratedProjectIdentifier) {
         return this.checkProfile().then(profile =>
             this.post<Models.IntegratedProjectIdentifier>(
-                'api/account/' + (this.accountToPost || profile.activeAccountId) + '/integrations/project',
+                this.getIntegrationProjectUrl(this.accountToPost || profile.activeAccountId),
                 identifier));
     }
 
@@ -299,7 +325,8 @@
         console.log('fetchIssuesDurations', identifiers);
         return this.checkProfile().then(profile =>
             this.postWithPesponse<Integrations.WebToolIssueIdentifier[], Integrations.WebToolIssueDuration[]>(
-                'api/timeentries/' + profile.activeAccountId + '/external/summary', identifiers));
+                this.getTimeEntriesSummaryUrl(profile.activeAccountId),
+                identifiers));
     }
 
     checkProfile() {
@@ -325,17 +352,26 @@
     }
 
     getVersion() {
-        return this.get('api/version');
+        return this.get<number>('api/version').then(version => {
+            this.serverApiVersion = version;
+            return version;
+        });
     }
 
     getTimer() {
+
         return this.checkProfile().then(profile => {
 
             var accountId = profile.activeAccountId;
             var userProfileId = profile.userProfileId;
 
-            var url = 'api/timer/' + accountId;
+            var url = this.getTimerUrl(accountId);
             var timer = this.get<Models.Timer>(url).then(timer => {
+
+                if (this.serverApiVersion < 2) {
+                    timer.details = getLegacyDetails(timer.workTask);
+                }
+
                 self.port.emit('updateTimer', timer);
                 return timer;
             });
@@ -343,16 +379,47 @@
             var now = new Date();
             var startTime = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toJSON();
             var endTime = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toJSON();
-            url = '/api/timeentries/' + accountId + '/' + userProfileId + '?startTime=' + startTime + '&endTime=' + endTime;
+            url = this.getTimeEntriesUrl(accountId, userProfileId) + `?startTime=${startTime}&endTime=${endTime}`;
             var tracker = this.get<Models.TimeEntry[]>(url).then(tracker => {
+
+                if (this.serverApiVersion < 2) {
+                    tracker.forEach(timeEntry => {
+                        timeEntry.details = getLegacyDetails(timeEntry.workTask);
+                    });
+                }
+
                 self.port.emit('updateTracker', tracker);
                 return tracker;
             });
 
-            var all = Promise.all<any>([timer, tracker]).then(() => <void>undefined);
+            var all = Promise.all([timer, tracker]).then(() => <void>undefined);
             all.catch(() => this.disconnect());
             return all;
         });
+
+        function getLegacyDetails(workTask: Models.WorkTaskLegacy) {
+
+            if (!workTask) {
+                return;
+            }
+
+            let details = <Models.TimeEntryDetail>{
+                description: workTask.description,
+                projectId: workTask.projectId
+            };
+
+            if (workTask.integrationId && workTask.relativeIssueUrl) {
+                details.projectTask = <Models.ProjectTask>{
+                    description: workTask.description,
+                    integrationId: workTask.integrationId,
+                    relativeIssueUrl: workTask.relativeIssueUrl,
+                    integrationUrl: workTask.integrationUrl,
+                    externalIssueId: workTask.externalIssueId
+                };
+            }
+
+            return details;
+        }
     }
 
     getProjects() {
@@ -434,9 +501,94 @@
                 {
                     statusText = '';
                 }
+                if (statusCode && !statusText) { // HTTP/2 does not define a way to carry the reason phrase
+                    statusText = SignalRConnection.statusDescriptions[statusCode];
+                }
                 reject(<AjaxStatus>{ statusCode, statusText });
             }
         });
+    }
+
+    private getIntegrationProjectUrl(accountId: number) {
+        return `api/account${this.serverApiVersion < 2 ? '' : 's'}/${accountId}/integrations/project`;
+    }
+
+    private getTimerUrl(accountId: number) {
+        if (this.serverApiVersion < 2) {
+            return `api/timer/${accountId}`;
+        }
+        return `api/accounts/${accountId}/timer`;
+    }
+
+    private getExternalTimerUrl(accountId: number) {
+        if (this.serverApiVersion < 2) {
+            return `api/timer/external/${accountId}`;
+        }
+        return `api/accounts/${accountId}/timer/external`;
+    }
+
+    private getTimeEntriesUrl(accountId: number, userProfileId: number) {
+        if (this.serverApiVersion < 2) {
+            return `api/timeentries/${accountId}/${userProfileId}`;
+        }
+        return `api/accounts/${accountId}/timeentries/${userProfileId}`;
+    }
+
+    private getTimeEntriesSummaryUrl(accountId: number) {
+        if (this.serverApiVersion < 2) {
+            return `api/timeentries/${accountId}/external/summary`;
+        }
+        return `api/accounts/${accountId}/timeentries/external/summary`;
+    }
+
+    static statusDescriptions = <{ [code: number]: string }>{
+        100: "Continue",
+        101: "Switching Protocols",
+        102: "Processing",
+        200: "OK",
+        201: "Created",
+        202: "Accepted",
+        203: "Non-Authoritative Information",
+        204: "No Content",
+        205: "Reset Content",
+        206: "Partial Content",
+        207: "Multi-Status",
+        300: "Multiple Choices",
+        301: "Moved Permanently",
+        302: "Found",
+        303: "See Other",
+        304: "Not Modified",
+        305: "Use Proxy",
+        307: "Temporary Redirect",
+        400: "Bad Request",
+        401: "Unauthorized",
+        402: "Payment Required",
+        403: "Forbidden",
+        404: "Not Found",
+        405: "Method Not Allowed",
+        406: "Not Acceptable",
+        407: "Proxy Authentication Required",
+        408: "Request Timeout",
+        409: "Conflict",
+        410: "Gone",
+        411: "Length Required",
+        412: "Precondition Failed",
+        413: "Request Entity Too Large",
+        414: "Request-Uri Too Long",
+        415: "Unsupported Media Type",
+        416: "Requested Range Not Satisfiable",
+        417: "Expectation Failed",
+        422: "Unprocessable Entity",
+        423: "Locked",
+        424: "Failed Dependency",
+        426: "Upgrade Required",
+        500: "Internal Server Error",
+        501: "Not Implemented",
+        502: "Bad Gateway",
+        503: "Service Unavailable",
+        504: "Gateway Timeout",
+        505: "Http Version Not Supported",
+        507: "Insufficient Storage"
     }
 }
 new SignalRConnection();
